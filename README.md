@@ -1,8 +1,8 @@
-<p align="center"><img src="docs/assets/logo.svg" width="520" alt="Simple RSVP Reader logo"></p>
+<p align="center"><img src="docs/assets/logo.png" width="520" alt="Simple RSVP Reader logo"></p>
 
-# Simple RSVP Reader – ESP32-S3 Touch AMOLED 1.8 V2
+# Simple RSVP Reader Micro
 
-Firmware fuer Waveshare ESP32-S3 Touch AMOLED 1.8 V2 (CO5300/CST816S) auf ESP-IDF v6.0.2.
+Open-source RSVP speed-reading firmware for the Waveshare ESP32-S3 Touch AMOLED 1.8 V2 (CO5300/CST816S), built with ESP-IDF 6.0.2.
 
 ## Install without development tools
 
@@ -18,8 +18,6 @@ Original project: https://github.com/ionutdecebal/rsvpnano
 
 RSVP Nano is licensed under the MIT License. The original notice `Copyright (c) 2026 RSVP Nano contributors` and the MIT license text are retained in this repository. See `LICENSE` and `NOTICE.md`.
 
-**Deutsch:** Simple RSVP Reader ist eine unabhängige Open-Source-Portierung und Weiterentwicklung, die teilweise auf RSVP Nano basiert. Sie ist keine offizielle Veröffentlichung des ursprünglichen Projekts. Der ursprüngliche Copyright- und Lizenzhinweis der MIT-Lizenz bleibt erhalten.
-
 Third-party dependencies and their licenses are documented in `THIRD_PARTY_NOTICES.md`.
 
 ### Embedded font licensing
@@ -29,32 +27,32 @@ The provenance-unknown inherited font bitmap has been replaced. `main/unicode_fo
 This source archive is prepared for public open-source release. Project code is MIT-licensed unless a file or third-party notice states otherwise.
 
 
-## Bedienung
+## Controls
 
-- Tap im Reader: Start/Pause
-- Wisch nach oben: +50 WPM
-- Wisch nach unten: -50 WPM
-- Wisch nach links: naechstes Wort
-- Wisch nach rechts: vorheriges Wort
-- Einstellungen: WPM auch mit -50/+50 aendern
+- Tap in the reader: start or pause
+- Swipe up: increase speed by 50 WPM
+- Swipe down: decrease speed by 50 WPM
+- Swipe left: next word
+- Swipe right: previous word
+- Settings: adjust WPM with the -50/+50 buttons
 
-## WLAN Upload
+## Wi-Fi upload
 
-Im Hauptmenue **WLAN Upload** auswaehlen.
+Select **WLAN Upload** in the main menu.
 
 - SSID: `RSVP-Reader`
-- Passwort: `reader1234`
+- Password: `reader1234`
 - Browser: `http://192.168.4.1`
 
-EPUB/TXT werden direkt auf die microSD geschrieben. USB-Dateiuebertragung ist in RC8 vollstaendig entfernt.
+EPUB and TXT files are written directly to the microSD card. USB file transfer was removed in RC8.
 
-## Touch-Aenderungen RC8
+## RC8 touch improvements
 
-- Swipes werden auch bei `LV_EVENT_PRESS_LOST` abgeschlossen statt verworfen.
-- Transparente Eingabeflaeche ueber dem Reader erfasst die Gesten konsistent.
-- Menuekarten besitzen groessere Abstaende.
-- Beruehrungen direkt am Rand einer Karte werden ignoriert, statt eventuell den Nachbareintrag zu starten.
-- WPM +/- verwendet dieselbe robuste Press/Release-Auswertung.
+- Swipes are completed on `LV_EVENT_PRESS_LOST` instead of being discarded.
+- A transparent input layer over the reader captures gestures consistently.
+- Menu cards have increased spacing.
+- Touches directly on a card edge are ignored to prevent accidental activation of an adjacent entry.
+- The WPM -/+ controls use the same robust press-and-release handling.
 
 ## Build
 
