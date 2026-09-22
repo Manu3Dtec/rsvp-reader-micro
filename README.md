@@ -6,7 +6,7 @@ Firmware fuer Waveshare ESP32-S3 Touch AMOLED 1.8 V2 (CO5300/CST816S) auf ESP-ID
 
 ## Install without development tools
 
-Open the browser installer linked in the repository description using desktop Chrome or Edge. Connect the board by USB, click **Connect & install**, select its serial port, and follow the prompts. No ESP-IDF setup or command line is required.
+**[Open the browser installer](https://manu3dtec.github.io/rsvp-reader-micro/installer/)** using desktop Chrome or Edge. Connect the board by USB, click **Connect & install**, select its serial port, and follow the prompts. No ESP-IDF setup or command line is required.
 
 The installer files are stored in `docs/installer`. Advanced users can still build and flash the project with ESP-IDF using the scripts in this repository.
 
