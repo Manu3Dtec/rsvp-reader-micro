@@ -44,6 +44,8 @@ constexpr uint32_t kOrp = 0xFF453A;
 constexpr uint16_t kMinWpm = 100;
 constexpr uint16_t kMaxWpm = 1000;
 constexpr uint16_t kWpmStep = 25;
+constexpr int32_t kScreenWidth = 448;
+constexpr int32_t kScreenHeight = 368;
 
 enum class Language : uint8_t { German = 0, English = 1 };
 enum class TransferMode : uint8_t { None = 0, Wifi };
@@ -469,7 +471,7 @@ void create_battery_indicator() {
 
     lv_obj_t *wrap = lv_obj_create(g_screen);
     lv_obj_set_size(wrap, 86, 28);
-    lv_obj_align(wrap, LV_ALIGN_TOP_RIGHT, -22, 5);
+    lv_obj_align(wrap, LV_ALIGN_TOP_RIGHT, -12, 5);
     lv_obj_set_style_bg_opa(wrap, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(wrap, 0, 0);
     lv_obj_set_style_pad_all(wrap, 0, 0);
@@ -536,7 +538,7 @@ void create_clock_indicator() {
     g_clock_text = make_label(g_screen, "--:--", &lv_font_montserrat_14, kMuted);
     lv_obj_set_width(g_clock_text, 52);
     lv_obj_set_style_text_align(g_clock_text, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_align(g_clock_text, LV_ALIGN_TOP_RIGHT, -28, 34);
+    lv_obj_align(g_clock_text, LV_ALIGN_TOP_RIGHT, -104, 8);
     lv_obj_remove_flag(g_clock_text, LV_OBJ_FLAG_CLICKABLE);
     update_clock_indicator();
     g_clock_timer = lv_timer_create(clock_ui_timer_cb, 60000, nullptr);
@@ -613,9 +615,10 @@ void request_shutdown() {
 }
 
 lv_obj_t *make_card(lv_obj_t *parent, const char *title, const char *subtitle,
-                        lv_event_cb_t cb, int32_t height, void *user_data = nullptr) {
+                        lv_event_cb_t cb, int32_t height, void *user_data = nullptr,
+                        int32_t width = LV_PCT(100)) {
     lv_obj_t *card = lv_button_create(parent);
-    lv_obj_set_width(card, 336);
+    lv_obj_set_width(card, width);
     lv_obj_set_height(card, height);
     lv_obj_set_style_radius(card, 18, 0);
     lv_obj_set_style_bg_color(card, lv_color_hex(kCard), 0);
@@ -625,17 +628,33 @@ lv_obj_t *make_card(lv_obj_t *parent, const char *title, const char *subtitle,
     lv_obj_set_style_pad_left(card, 18, 0);
     lv_obj_set_style_pad_right(card, 18, 0);
     lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_ext_click_area(card, 6);
     lv_obj_add_event_cb(card, cb, LV_EVENT_CLICKED, user_data);
 
-    lv_obj_t *t = make_label(card, title, &rsvp_unicode_18, kText);
-    lv_obj_align(t, LV_ALIGN_LEFT_MID, 0, subtitle ? -12 : 0);
+    // Long book names need several lines on the compact display.  Use the
+    // smaller Unicode font when necessary instead of letting the label draw
+    // over the subtitle or the next card.
+    const lv_font_t *title_font = std::strlen(title) > 28 ? &rsvp_unicode_14 : &rsvp_unicode_18;
+    lv_obj_t *t = make_label(card, title, title_font, kText);
+    lv_obj_set_width(t, LV_PCT(82));
+    lv_label_set_long_mode(t, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_LEFT, 0);
+    if (subtitle) {
+        lv_obj_set_height(t, 26);
+        lv_obj_align(t, LV_ALIGN_TOP_LEFT, 0, 14);
+    } else {
+        lv_obj_set_height(t, height - 24);
+        lv_obj_align(t, LV_ALIGN_LEFT_MID, 0, 0);
+    }
     lv_obj_remove_flag(t, LV_OBJ_FLAG_CLICKABLE);
 
     if (subtitle) {
         lv_obj_t *sub = make_label(card, subtitle, &rsvp_unicode_14, kMuted);
-        lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(sub, 270);
-        lv_obj_align(sub, LV_ALIGN_LEFT_MID, 0, 15);
+        lv_label_set_long_mode(sub, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(sub, LV_PCT(82));
+        lv_obj_set_height(sub, height - 54);
+        lv_obj_align(sub, LV_ALIGN_TOP_LEFT, 0, 46);
+        lv_obj_set_style_text_align(sub, LV_TEXT_ALIGN_LEFT, 0);
         lv_obj_remove_flag(sub, LV_OBJ_FLAG_CLICKABLE);
     }
 
@@ -768,10 +787,8 @@ void render_word(const std::string &word) {
     lv_label_set_text(g_orp, orp.c_str());
     lv_label_set_text(g_after, after.c_str());
 
-    // Choose by the REAL rendered pixel width of the complete word.
-    // The ORP remains centered whenever possible. Only if a word would hit an
-    // edge do we move the ORP just far enough to keep the larger font visible.
-    // This avoids shrinking words merely because one side of the ORP is long.
+    // Keep the ORP exactly on the fixed focus line. Measure both halves of the
+    // word separately and reduce the font until neither side reaches an edge.
     const lv_font_t *fonts[] = {
         &rsvp_unicode_36,
         &rsvp_unicode_28,
@@ -794,12 +811,7 @@ void render_word(const std::string &word) {
         ESP_LOGW(TAG, "Reader width not ready; postponing word layout");
         return;
     }
-    const int usable_width = area_width - 2 * kEdgeMargin;
-
     const lv_font_t *selected_font = fonts[sizeof(fonts) / sizeof(fonts[0]) - 1];
-    int selected_before_width = 0;
-    int selected_focus_width = 0;
-    int selected_after_width = 0;
 
     for (const lv_font_t *font : fonts) {
         lv_obj_set_style_text_font(g_before, font, 0);
@@ -816,16 +828,15 @@ void render_word(const std::string &word) {
         const int after_width = lv_obj_get_width(g_after);
         const int left_gap = before.empty() ? 0 : kWordGap;
         const int right_gap = after.empty() ? 0 : kWordGap;
-        const int total_width = before_width + left_gap + focus_width +
-                                right_gap + after_width;
-
         selected_font = font;
-        selected_before_width = before_width;
-        selected_focus_width = focus_width;
-        selected_after_width = after_width;
+        const int focus_left = (area_width - focus_width) / 2;
+        const int left_room = focus_left - kEdgeMargin;
+        const int right_room = area_width - focus_left - focus_width - kEdgeMargin;
 
-        // Fonts are ordered largest -> smallest: first complete-word fit wins.
-        if (total_width <= usable_width) break;
+        // Fonts are ordered largest -> smallest: the first font whose two
+        // word halves fit around the centered ORP wins.
+        if (before_width + left_gap <= left_room &&
+            after_width + right_gap <= right_room) break;
     }
 
     // Re-apply the selected font for a deterministic final layout.
@@ -836,30 +847,7 @@ void render_word(const std::string &word) {
     lv_obj_update_layout(g_orp);
     lv_obj_update_layout(g_after);
 
-    selected_before_width = lv_obj_get_width(g_before);
-    selected_focus_width = lv_obj_get_width(g_orp);
-    selected_after_width = lv_obj_get_width(g_after);
-
-    const int left_gap = before.empty() ? 0 : kWordGap;
-    const int right_gap = after.empty() ? 0 : kWordGap;
-    const int left_extent = selected_before_width + left_gap;
-    const int right_extent = right_gap + selected_after_width;
-
-    // Valid ORP-center range that keeps the whole word inside the reader area.
-    const int nominal_center = area_width / 2;
-    const int min_center = kEdgeMargin + left_extent + selected_focus_width / 2;
-    const int max_center = area_width - kEdgeMargin - right_extent -
-                           (selected_focus_width - selected_focus_width / 2);
-
-    int focus_center = nominal_center;
-    if (min_center <= max_center) {
-        focus_center = std::clamp(nominal_center, min_center, max_center);
-    }
-    const int focus_offset = focus_center - nominal_center;
-
-    // Center ORP for normal words; shift only as much as necessary for a long,
-    // asymmetric word. This preserves RSVP focus while using much more width.
-    lv_obj_align(g_orp, LV_ALIGN_CENTER, focus_offset, -6);
+    lv_obj_align(g_orp, LV_ALIGN_CENTER, 0, -6);
     lv_obj_align_to(g_before, g_orp, LV_ALIGN_OUT_LEFT_MID,
                     before.empty() ? 0 : -kWordGap, 0);
     lv_obj_align_to(g_after, g_orp, LV_ALIGN_OUT_RIGHT_MID,
@@ -928,7 +916,8 @@ void step_word(bool forward) {
 
 bool reader_touch_zone(const lv_point_t &p) {
     // Exclude the top navigation/header area and the extreme bottom edge.
-    return p.y >= 82 && p.y <= 410 && p.x >= 4 && p.x <= 364;
+    return p.y >= 76 && p.y <= kScreenHeight - 4 &&
+           p.x >= 4 && p.x <= kScreenWidth - 4;
 }
 
 void reader_touch_timer_cb(lv_timer_t *) {
@@ -972,13 +961,12 @@ void reader_touch_timer_cb(lv_timer_t *) {
         if (ay >= kSwipeThreshold && ay >= ax + kAxisMargin) {
             g_reader_gesture_fired = true;
             stop_reader();
-
             if (dy < 0) {
-                ESP_LOGI(TAG, "Reader POLL swipe UP dx=%d dy=%d -> +%u WPM",
+                ESP_LOGI(TAG, "Reader swipe UP dx=%d dy=%d -> +%u WPM",
                          dx, dy, kWpmStep);
                 change_wpm(static_cast<int>(kWpmStep));
             } else {
-                ESP_LOGI(TAG, "Reader POLL swipe DOWN dx=%d dy=%d -> -%u WPM",
+                ESP_LOGI(TAG, "Reader swipe DOWN dx=%d dy=%d -> -%u WPM",
                          dx, dy, kWpmStep);
                 change_wpm(-static_cast<int>(kWpmStep));
             }
@@ -987,14 +975,11 @@ void reader_touch_timer_cb(lv_timer_t *) {
 
         if (ax >= kSwipeThreshold && ax >= ay + kAxisMargin) {
             g_reader_gesture_fired = true;
-
             if (dx < 0) {
-                ESP_LOGI(TAG, "Reader POLL swipe LEFT dx=%d dy=%d -> next",
-                         dx, dy);
+                ESP_LOGI(TAG, "Reader swipe LEFT dx=%d dy=%d -> next", dx, dy);
                 step_word(true);
             } else {
-                ESP_LOGI(TAG, "Reader POLL swipe RIGHT dx=%d dy=%d -> previous",
-                         dx, dy);
+                ESP_LOGI(TAG, "Reader swipe RIGHT dx=%d dy=%d -> previous", dx, dy);
                 step_word(false);
             }
             return;
@@ -1307,74 +1292,93 @@ void show_home() {
     scan_books();
 
     lv_obj_t *brand = make_label(g_screen, "RSVP", &lv_font_montserrat_28, kText);
-    lv_obj_align(brand, LV_ALIGN_TOP_LEFT, 18, 14);
+    lv_obj_align(brand, LV_ALIGN_TOP_LEFT, 18, 30);
     lv_obj_t *reader = make_label(g_screen, "READER", &lv_font_montserrat_14, kAccent);
-    lv_obj_align(reader, LV_ALIGN_TOP_LEFT, 20, 50);
+    lv_obj_align(reader, LV_ALIGN_TOP_LEFT, 20, 66);
 
     lv_obj_t *tagline = make_label(g_screen,
         tr("Schneller lesen. Ruhiger fokussieren.", "Read faster. Focus calmly."),
         &lv_font_montserrat_14, kMuted);
-    lv_obj_align(tagline, LV_ALIGN_TOP_LEFT, 18, 73);
+    lv_obj_set_width(tagline, 112);
+    lv_label_set_long_mode(tagline, LV_LABEL_LONG_WRAP);
+    lv_obj_align(tagline, LV_ALIGN_TOP_LEFT, 18, 94);
 
     lv_obj_t *stack = lv_obj_create(g_screen);
-    lv_obj_set_size(stack, 350, 346);
-    lv_obj_align(stack, LV_ALIGN_BOTTOM_MID, 0, -4);
+    lv_obj_set_size(stack, 318, 316);
+    lv_obj_align(stack, LV_ALIGN_BOTTOM_RIGHT, -6, -8);
     lv_obj_set_style_bg_opa(stack, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(stack, 0, 0);
-    lv_obj_set_style_pad_all(stack, 6, 0);
-    lv_obj_set_style_pad_row(stack, 8, 0);
+    lv_obj_set_style_pad_left(stack, 8, 0);
+    lv_obj_set_style_pad_right(stack, 14, 0);
+    lv_obj_set_style_pad_top(stack, 6, 0);
+    lv_obj_set_style_pad_bottom(stack, 8, 0);
+    lv_obj_set_style_pad_row(stack, 12, 0);
     lv_obj_set_flex_flow(stack, LV_FLEX_FLOW_COLUMN);
     lv_obj_add_flag(stack, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(stack, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+    lv_obj_set_scroll_dir(stack, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(stack, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_width(stack, 5, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(stack, lv_color_hex(kAccent), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(stack, LV_OPA_70, LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(stack, 3, LV_PART_SCROLLBAR);
+
+    constexpr int32_t kHomeCardWidth = 288;
+    constexpr int32_t kHomeCardHeight = 112;
 
     if (file_exists(g_last_book)) {
         const std::string subtitle = display_safe(basename_no_ext(g_last_book));
-        make_card(stack, tr("Weiterlesen", "Continue reading"), subtitle.c_str(), continue_cb, 56);
+        make_card(stack, tr("Weiterlesen", "Continue reading"), subtitle.c_str(),
+                  continue_cb, kHomeCardHeight, nullptr, kHomeCardWidth);
     }
 
-    if (!g_recent_books.empty()) {
-        lv_obj_t *recent_title = make_label(stack, tr("Zuletzt gelesen", "Recently read"), &rsvp_unicode_14, kMuted);
-        lv_obj_set_width(recent_title, 320);
-        for (auto &path : g_recent_books) {
-            if (!file_exists(path) || path == g_last_book) continue;
-            const std::string title = display_safe(basename_no_ext(path));
-            make_card(stack, title.c_str(), nullptr, recent_book_cb, 48, &path);
-        }
+    for (auto &path : g_recent_books) {
+        if (!file_exists(path) || path == g_last_book) continue;
+        const std::string title = display_safe(basename_no_ext(path));
+        make_card(stack, title.c_str(), nullptr, recent_book_cb,
+                  kHomeCardHeight, &path, kHomeCardWidth);
+        break;
     }
 
     char library_sub[96];
     std::snprintf(library_sub, sizeof(library_sub), tr("%u Bücher • %s", "%u books • %s"),
                   static_cast<unsigned>(g_books.size()), format_storage().c_str());
-    make_card(stack, tr("Bibliothek", "Library"), library_sub, library_cb, 56);
+    make_card(stack, tr("Bibliothek", "Library"), library_sub, library_cb,
+              kHomeCardHeight, nullptr, kHomeCardWidth);
     make_card(stack, tr("WLAN Upload", "Wi-Fi upload"),
-              tr("Hotspot + Browser", "Hotspot + browser"), wifi_transfer_cb, 56);
+              tr("Hotspot + Browser", "Hotspot + browser"), wifi_transfer_cb,
+              kHomeCardHeight, nullptr, kHomeCardWidth);
     make_card(stack, tr("Sprache", "Language"),
-              g_language == Language::German ? "Deutsch" : "English", language_cb, 56);
+              g_language == Language::German ? "Deutsch" : "English", language_cb,
+              kHomeCardHeight, nullptr, kHomeCardWidth);
 
     char setting_sub[96];
     std::snprintf(setting_sub, sizeof(setting_sub), tr("%u WPM • Helligkeit %u%%", "%u WPM • Brightness %u%%"),
                   g_wpm, g_brightness);
-    make_card(stack, tr("Einstellungen", "Settings"), setting_sub, settings_cb, 56);
+    make_card(stack, tr("Einstellungen", "Settings"), setting_sub, settings_cb,
+              kHomeCardHeight, nullptr, kHomeCardWidth);
 }
 
 void show_library() {
     clear_screen();
     scan_books();
 
-    lv_obj_t *back = make_small_button(g_screen, "<", home_cb, 48);
+    lv_obj_t *back = make_small_button(g_screen, "<", home_cb, 64);
+    lv_obj_set_height(back, 56);
+    lv_obj_set_ext_click_area(back, 8);
     lv_obj_align(back, LV_ALIGN_TOP_LEFT, 12, 12);
     lv_obj_t *title = make_label(g_screen, tr("Bibliothek", "Library"), &lv_font_montserrat_24, kText);
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 76, 18);
 
     const std::string storage = format_storage();
     lv_obj_t *sub = make_label(g_screen, storage.c_str(), &rsvp_unicode_14, kMuted);
-    lv_obj_set_width(sub, 270);
+    lv_obj_set_width(sub, 330);
     lv_label_set_long_mode(sub, LV_LABEL_LONG_DOT);
     lv_obj_align(sub, LV_ALIGN_TOP_LEFT, 76, 51);
 
     lv_obj_t *list = lv_obj_create(g_screen);
-    lv_obj_set_size(list, 348, 356);
-    lv_obj_align(list, LV_ALIGN_BOTTOM_MID, 0, -12);
+    lv_obj_set_size(list, 424, 284);
+    lv_obj_align(list, LV_ALIGN_BOTTOM_MID, 0, -8);
     lv_obj_set_style_bg_color(list, lv_color_hex(kBg), 0);
     lv_obj_set_style_border_width(list, 0, 0);
     lv_obj_set_style_pad_all(list, 4, 0);
@@ -1393,7 +1397,7 @@ void show_library() {
             tr("Keine Bücher gefunden.\nEPUB/TXT per WLAN hochladen.",
                "No books found.\nUpload EPUB/TXT via Wi-Fi."),
             &rsvp_unicode_14, kMuted);
-        lv_obj_set_width(msg, 300);
+        lv_obj_set_width(msg, 390);
         lv_obj_set_style_text_align(msg, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(msg);
         return;
@@ -1401,7 +1405,7 @@ void show_library() {
 
     for (auto &path : g_books) {
         lv_obj_t *row = lv_obj_create(list);
-        lv_obj_set_size(row, 326, 66);
+        lv_obj_set_size(row, 402, 66);
         lv_obj_set_style_radius(row, 14, 0);
         lv_obj_set_style_bg_color(row, lv_color_hex(kCard), 0);
         lv_obj_set_style_border_width(row, 0, 0);
@@ -1409,7 +1413,7 @@ void show_library() {
         lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
         lv_obj_t *open = lv_button_create(row);
-        lv_obj_set_size(open, 252, 54);
+        lv_obj_set_size(open, 328, 54);
         lv_obj_align(open, LV_ALIGN_LEFT_MID, 0, 0);
         lv_obj_set_style_bg_opa(open, LV_OPA_TRANSP, 0);
         lv_obj_set_style_bg_color(open, lv_color_hex(kCardPressed), LV_STATE_PRESSED);
@@ -1418,7 +1422,7 @@ void show_library() {
 
         const std::string name = display_safe(basename_no_ext(path));
         lv_obj_t *label = make_label(open, name.c_str(), &rsvp_unicode_14, kText);
-        lv_obj_set_width(label, 232);
+        lv_obj_set_width(label, 308);
         lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
         lv_obj_align(label, LV_ALIGN_LEFT_MID, 4, 0);
         lv_obj_remove_flag(label, LV_OBJ_FLAG_CLICKABLE);
@@ -1446,8 +1450,8 @@ void show_settings() {
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 76, 21);
 
     lv_obj_t *list = lv_obj_create(g_screen);
-    lv_obj_set_size(list, 348, 360);
-    lv_obj_align(list, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_set_size(list, 424, 286);
+    lv_obj_align(list, LV_ALIGN_BOTTOM_MID, 0, -8);
     lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(list, 0, 0);
     lv_obj_set_style_pad_all(list, 4, 0);
@@ -1458,7 +1462,7 @@ void show_settings() {
     auto make_setting = [&](const char *name, lv_obj_t **value_label,
                             const char *value, lv_event_cb_t down, lv_event_cb_t up) {
         lv_obj_t *card = lv_obj_create(list);
-        lv_obj_set_size(card, 326, 94);
+        lv_obj_set_size(card, 402, 82);
         lv_obj_set_style_radius(card, 16, 0);
         lv_obj_set_style_bg_color(card, lv_color_hex(kCard), 0);
         lv_obj_set_style_border_width(card, 0, 0);
@@ -1504,7 +1508,7 @@ void show_settings() {
                  clause_pause_down_cb, clause_pause_up_cb);
 
     lv_obj_t *hint = lv_obj_create(list);
-    lv_obj_set_size(hint, 326, 166);
+    lv_obj_set_size(hint, 402, 150);
     lv_obj_set_style_radius(hint, 16, 0);
     lv_obj_set_style_bg_color(hint, lv_color_hex(kCard), 0);
     lv_obj_set_style_border_width(hint, 0, 0);
@@ -1514,7 +1518,7 @@ void show_settings() {
         tr("Reader\nHoch/Runter   Tempo ±25 WPM\nLinks/Rechts  Wort zurück/vor\nTippen         Start/Pause",
            "Reader\nUp/Down       Speed ±25 WPM\nLeft/Right   Word back/forward\nTap             Play/Pause"),
         &rsvp_unicode_14, kText);
-    lv_obj_set_width(txt, 292);
+    lv_obj_set_width(txt, 368);
     lv_label_set_long_mode(txt, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_line_space(txt, 8, 0);
     lv_obj_align(txt, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -1532,8 +1536,8 @@ void show_language() {
     lv_obj_align(sub, LV_ALIGN_TOP_LEFT, 18, 72);
 
     lv_obj_t *stack = lv_obj_create(g_screen);
-    lv_obj_set_size(stack, 350, 200);
-    lv_obj_align(stack, LV_ALIGN_TOP_MID, 0, 110);
+    lv_obj_set_size(stack, 424, 220);
+    lv_obj_align(stack, LV_ALIGN_TOP_MID, 0, 100);
     lv_obj_set_style_bg_opa(stack, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(stack, 0, 0);
     lv_obj_set_style_pad_all(stack, 7, 0);
@@ -1553,30 +1557,30 @@ void show_delete_confirm(const std::string &path) {
     clear_screen();
 
     lv_obj_t *title = make_label(g_screen, tr("Buch löschen?", "Delete book?"), &rsvp_unicode_24, kText);
-    lv_obj_set_width(title, 320);
+    lv_obj_set_width(title, 410);
     lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 94);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 64);
 
     const std::string name = display_safe(basename_no_ext(path));
     lv_obj_t *book = make_label(g_screen, name.c_str(), &rsvp_unicode_18, kMuted);
-    lv_obj_set_width(book, 300);
+    lv_obj_set_width(book, 400);
     lv_label_set_long_mode(book, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(book, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(book, LV_ALIGN_TOP_MID, 0, 145);
+    lv_obj_align(book, LV_ALIGN_TOP_MID, 0, 112);
 
     lv_obj_t *note = make_label(g_screen,
         tr("Die Datei wird dauerhaft von der microSD gelöscht.",
            "The file will be permanently deleted from the microSD."),
         &rsvp_unicode_14, kMuted);
-    lv_obj_set_width(note, 300);
+    lv_obj_set_width(note, 400);
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(note, LV_ALIGN_TOP_MID, 0, 205);
+    lv_obj_align(note, LV_ALIGN_TOP_MID, 0, 164);
 
     lv_obj_t *cancel = make_direct_button(g_screen, tr("Abbrechen", "Cancel"), delete_cancel_cb, 145, 54);
-    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 22, -52);
+    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 54, -35);
     lv_obj_t *del = make_direct_button(g_screen, tr("Löschen", "Delete"), delete_confirm_cb, 145, 54);
-    lv_obj_align(del, LV_ALIGN_BOTTOM_RIGHT, -22, -52);
+    lv_obj_align(del, LV_ALIGN_BOTTOM_RIGHT, -54, -35);
     lv_obj_set_style_bg_color(del, lv_color_hex(0xB3261E), 0);
 }
 
@@ -1590,8 +1594,8 @@ void show_wifi_transfer() {
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 76, 21);
 
     lv_obj_t *card = lv_obj_create(g_screen);
-    lv_obj_set_size(card, 340, 278);
-    lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 82);
+    lv_obj_set_size(card, 414, 210);
+    lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 72);
     lv_obj_set_style_radius(card, 18, 0);
     lv_obj_set_style_bg_color(card, lv_color_hex(kCard), 0);
     lv_obj_set_style_border_width(card, 0, 0);
@@ -1603,40 +1607,40 @@ void show_wifi_transfer() {
         &lv_font_montserrat_14, kMuted);
     lv_obj_align(step1, LV_ALIGN_TOP_LEFT, 0, 0);
 
-    lv_obj_t *ssid = make_label(card, "RSVP-Reader", &rsvp_unicode_24, kText);
-    lv_obj_align(ssid, LV_ALIGN_TOP_LEFT, 0, 24);
+    lv_obj_t *ssid = make_label(card, "RSVP-Reader", &rsvp_unicode_18, kText);
+    lv_obj_align(ssid, LV_ALIGN_TOP_LEFT, 205, 0);
 
     lv_obj_t *step2 = make_label(card,
         tr("2. Passwort:", "2. Password:"),
         &rsvp_unicode_14, kMuted);
-    lv_obj_align(step2, LV_ALIGN_TOP_LEFT, 0, 66);
+    lv_obj_align(step2, LV_ALIGN_TOP_LEFT, 0, 46);
 
-    lv_obj_t *pw = make_label(card, "reader1234", &rsvp_unicode_24, kText);
-    lv_obj_align(pw, LV_ALIGN_TOP_LEFT, 0, 88);
+    lv_obj_t *pw = make_label(card, "reader1234", &rsvp_unicode_18, kText);
+    lv_obj_align(pw, LV_ALIGN_TOP_LEFT, 205, 46);
 
     lv_obj_t *step3 = make_label(card,
         tr("3. Im Browser öffnen:", "3. Open in browser:"),
         &rsvp_unicode_14, kMuted);
-    lv_obj_align(step3, LV_ALIGN_TOP_LEFT, 0, 132);
+    lv_obj_align(step3, LV_ALIGN_TOP_LEFT, 0, 92);
 
-    lv_obj_t *ip = make_label(card, "192.168.4.1", &rsvp_unicode_24, kText);
-    lv_obj_align(ip, LV_ALIGN_TOP_LEFT, 0, 154);
+    lv_obj_t *ip = make_label(card, "192.168.4.1", &rsvp_unicode_18, kText);
+    lv_obj_align(ip, LV_ALIGN_TOP_LEFT, 205, 92);
 
     lv_obj_t *note = make_label(card,
         tr("EPUB/TXT auswählen und hochladen.", "Choose EPUB/TXT and upload."),
         &rsvp_unicode_14, kMuted);
-    lv_obj_set_width(note, 300);
+    lv_obj_set_width(note, 374);
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-    lv_obj_align(note, LV_ALIGN_TOP_LEFT, 0, 202);
+    lv_obj_align(note, LV_ALIGN_TOP_LEFT, 0, 142);
 
     g_transfer_status = make_label(g_screen, tr("WLAN wird gestartet...", "Starting Wi-Fi..."), &lv_font_montserrat_14, kAccent);
-    lv_obj_set_width(g_transfer_status, 330);
+    lv_obj_set_width(g_transfer_status, 410);
     lv_obj_set_style_text_align(g_transfer_status, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(g_transfer_status, LV_ALIGN_BOTTOM_MID, 0, -48);
+    lv_obj_align(g_transfer_status, LV_ALIGN_BOTTOM_MID, 0, -42);
 
     g_transfer_bar = lv_bar_create(g_screen);
-    lv_obj_set_size(g_transfer_bar, 300, 6);
-    lv_obj_align(g_transfer_bar, LV_ALIGN_BOTTOM_MID, 0, -24);
+    lv_obj_set_size(g_transfer_bar, 390, 6);
+    lv_obj_align(g_transfer_bar, LV_ALIGN_BOTTOM_MID, 0, -20);
     lv_bar_set_range(g_transfer_bar, 0, 100);
     lv_obj_add_flag(g_transfer_bar, LV_OBJ_FLAG_HIDDEN);
 
@@ -1656,46 +1660,48 @@ void error_back_cb(lv_event_t *) { show_library(); }
 void show_error(const char *title, const std::string &message) {
     clear_screen();
     lv_obj_t *t = make_label(g_screen, title, &lv_font_montserrat_18, kText);
-    lv_obj_set_width(t, 320);
+    lv_obj_set_width(t, 410);
     lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 80);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 58);
     lv_obj_t *m = make_label(g_screen, message.c_str(), &lv_font_montserrat_14, kMuted);
-    lv_obj_set_width(m, 310);
+    lv_obj_set_width(m, 400);
     lv_label_set_long_mode(m, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(m, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(m, LV_ALIGN_CENTER, 0, -10);
     lv_obj_t *back = make_small_button(g_screen, tr("Zurueck", "Back"), error_back_cb, 120);
-    lv_obj_align(back, LV_ALIGN_BOTTOM_MID, 0, -45);
+    lv_obj_align(back, LV_ALIGN_BOTTOM_MID, 0, -28);
 }
 
 void build_reader_ui() {
     clear_screen();
 
-    lv_obj_t *back = make_small_button(g_screen, "<", home_cb, 48);
-    lv_obj_align(back, LV_ALIGN_TOP_LEFT, 10, 10);
+    lv_obj_t *back = make_small_button(g_screen, "<", home_cb, 64);
+    lv_obj_set_height(back, 56);
+    lv_obj_set_ext_click_area(back, 8);
+    lv_obj_align(back, LV_ALIGN_TOP_LEFT, 8, 8);
 
     const std::string safe_title = display_safe(g_active_book_title);
     lv_obj_t *title = make_label(g_screen, safe_title.c_str(), &rsvp_unicode_14, kText);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 190);
-    lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 22);
+    lv_obj_set_width(title, 200);
+    lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 68, 12);
 
     g_progress_label = make_label(g_screen, "0%", &rsvp_unicode_14, kMuted);
-    lv_obj_set_width(g_progress_label, 210);
+    lv_obj_set_width(g_progress_label, 200);
     lv_label_set_long_mode(g_progress_label, LV_LABEL_LONG_DOT);
-    lv_obj_align(g_progress_label, LV_ALIGN_TOP_LEFT, 78, 48);
+    lv_obj_align(g_progress_label, LV_ALIGN_TOP_LEFT, 68, 36);
 
     g_progress_bar = lv_bar_create(g_screen);
-    lv_obj_set_size(g_progress_bar, 330, 3);
-    lv_obj_align(g_progress_bar, LV_ALIGN_TOP_MID, 0, 72);
+    lv_obj_set_size(g_progress_bar, 424, 3);
+    lv_obj_align(g_progress_bar, LV_ALIGN_TOP_MID, 0, 62);
     lv_obj_set_style_bg_color(g_progress_bar, lv_color_hex(0x2C2C2E), LV_PART_MAIN);
     lv_obj_set_style_bg_color(g_progress_bar, lv_color_hex(kAccent), LV_PART_INDICATOR);
     lv_bar_set_range(g_progress_bar, 0, 100);
 
     lv_obj_t *reader_area = lv_obj_create(g_screen);
-    lv_obj_set_size(reader_area, 354, 250);
-    lv_obj_align(reader_area, LV_ALIGN_CENTER, 0, -2);
+    lv_obj_set_size(reader_area, 434, 230);
+    lv_obj_align(reader_area, LV_ALIGN_CENTER, 0, 16);
     lv_obj_set_style_bg_opa(reader_area, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(reader_area, 0, 0);
     lv_obj_set_style_pad_all(reader_area, 0, 0);
@@ -1713,22 +1719,22 @@ void build_reader_ui() {
     lv_obj_set_size(focus_top, 2, 15);
     lv_obj_set_style_bg_color(focus_top, lv_color_hex(kMuted), 0);
     lv_obj_set_style_border_width(focus_top, 0, 0);
-    lv_obj_align(focus_top, LV_ALIGN_CENTER, 0, -55);
+    lv_obj_align(focus_top, LV_ALIGN_CENTER, 0, -48);
     lv_obj_remove_flag(focus_top, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *focus_bottom = lv_obj_create(reader_area);
     lv_obj_set_size(focus_bottom, 2, 15);
     lv_obj_set_style_bg_color(focus_bottom, lv_color_hex(kMuted), 0);
     lv_obj_set_style_border_width(focus_bottom, 0, 0);
-    lv_obj_align(focus_bottom, LV_ALIGN_CENTER, 0, 42);
+    lv_obj_align(focus_bottom, LV_ALIGN_CENTER, 0, 35);
     lv_obj_remove_flag(focus_bottom, LV_OBJ_FLAG_CLICKABLE);
 
     g_play_hint = make_label(reader_area, tr("Tippen zum Starten", "Tap to play"), &lv_font_montserrat_14, kMuted);
-    lv_obj_align(g_play_hint, LV_ALIGN_BOTTOM_MID, 0, -3);
+    lv_obj_align(g_play_hint, LV_ALIGN_BOTTOM_MID, 0, -4);
     lv_obj_remove_flag(g_play_hint, LV_OBJ_FLAG_CLICKABLE);
 
     g_speed_label = make_label(g_screen, "", &lv_font_montserrat_14, kMuted);
-    lv_obj_align(g_speed_label, LV_ALIGN_BOTTOM_MID, 0, -19);
+    lv_obj_align(g_speed_label, LV_ALIGN_BOTTOM_MID, 0, -10);
 
 
     g_overlay = make_label(g_screen, "", &lv_font_montserrat_18, kText);
@@ -1739,7 +1745,7 @@ void build_reader_ui() {
     lv_obj_set_style_pad_right(g_overlay, 16, 0);
     lv_obj_set_style_pad_top(g_overlay, 9, 0);
     lv_obj_set_style_pad_bottom(g_overlay, 9, 0);
-    lv_obj_align(g_overlay, LV_ALIGN_CENTER, 0, 85);
+    lv_obj_align(g_overlay, LV_ALIGN_CENTER, 0, 68);
     lv_obj_add_flag(g_overlay, LV_OBJ_FLAG_HIDDEN);
 
     // Reader input is captured directly from the BSP LVGL input device.
@@ -1893,7 +1899,7 @@ extern "C" void app_main(void) {
     load_settings();
     transfer_common_init();
 
-    ESP_LOGI(TAG, "RSVP Reader V2 RC16 PWR starting");
+    ESP_LOGI(TAG, "Simple RSVP Reader Micro 2.3.0-rc17 starting");
     ESP_LOGI(TAG, "Target: Waveshare ESP32-S3 Touch AMOLED 1.8 V2 / CO5300 / CST820");
 
     lv_display_t *display = bsp_display_start();
@@ -1930,6 +1936,10 @@ extern "C" void app_main(void) {
         ESP_LOGE(TAG, "Could not acquire LVGL lock");
         return;
     }
+    // Landscape orientation for holding the device with its hardware buttons
+    // along the upper edge. LVGL also rotates pointer coordinates with display.
+    bsp_display_rotate(display, LV_DISPLAY_ROTATION_270);
+    ESP_LOGI(TAG, "Display rotated to landscape (448x368, buttons up)");
     lv_timer_t *power_timer = lv_timer_create(power_timer_cb, 250, nullptr);
     (void)power_timer;
     gpio_config_t boot_cfg{};

@@ -6,6 +6,16 @@
 
 Open-source RSVP speed-reading firmware for the Waveshare ESP32-S3 Touch AMOLED 1.8 V2 (CO5300/CST816S), built with ESP-IDF 6.0.2.
 
+Current release: **2.3.0-rc17**
+
+## RC17 highlights
+
+- Landscape 448×368 interface with the hardware buttons along the upper edge
+- Larger touch targets and improved vertical scrolling
+- More reliable horizontal and vertical reader gestures
+- Better layout for long book names and recently read books
+- Fixed ORP alignment, clock placement, battery spacing, and reader controls
+
 ## Install without development tools
 
 **[Open the browser installer](https://manu3dtec.github.io/rsvp-reader-micro/installer/)** using desktop Chrome or Edge. Connect the board by USB, click **Connect & install**, select its serial port, and follow the prompts. No ESP-IDF setup or command line is required.

@@ -1,6 +1,6 @@
 {
   "name": "Simple RSVP Reader Micro",
-  "version": "2.3-rc17",
+  "version": "2.3.0-rc17",
   "new_install_prompt_erase": true,
   "builds": [{
     "chipFamily": "ESP32-S3",
