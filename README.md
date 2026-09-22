@@ -1,5 +1,7 @@
 <p align="center"><img src="docs/assets/logo.png" width="520" alt="Simple RSVP Reader logo"></p>
 
+<p align="center"><a href="https://ko-fi.com/manu3dtec"><img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support Manu3Dtec on Ko-fi"></a></p>
+
 # Simple RSVP Reader Micro
 
 Open-source RSVP speed-reading firmware for the Waveshare ESP32-S3 Touch AMOLED 1.8 V2 (CO5300/CST816S), built with ESP-IDF 6.0.2.
